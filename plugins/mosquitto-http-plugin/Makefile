@@ -2,7 +2,7 @@ include ../../config.mk
 
 .PHONY : all binary check clean reallyclean test install uninstall
 
-PLUGIN_NAME=mosquitto_auth_http
+PLUGIN_NAME=mosquitto_http_plugin
 
 all : binary
 
