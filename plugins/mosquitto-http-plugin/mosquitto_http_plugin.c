@@ -33,17 +33,21 @@ static char target_url[128] = "http://127.0.0.1:8899";
 /// @param jsonString
 /// @param url
 /// @return
-static CURLcode http_post(char *jsonString, const char *url)
+static long http_post(char *jsonString, const char *url)
 {
   curl_easy_setopt(curl_client, CURLOPT_URL, url);
   curl_easy_setopt(curl_client, CURLOPT_HTTPHEADER, curl_http_headers);
   curl_easy_setopt(curl_client, CURLOPT_POSTFIELDS, jsonString);
-  CURLcode code = curl_easy_perform(curl_client);
+  long code = curl_easy_perform(curl_client);
+
   if (code != CURLE_OK)
   {
     mosquitto_log_printf(MOSQ_LOG_ERR, "http post error with error: %s, %s", curl_easy_strerror(code), target_url);
+    return code;
   }
-  return code;
+  long http_code = 0;
+  curl_easy_getinfo(curl_client, CURLINFO_RESPONSE_CODE, &http_code);
+  return http_code;
 }
 /// @brief 当客户端离线的时候调用
 /// @param event
@@ -66,10 +70,10 @@ static int on_disconnect_callback(int event, void *event_data, void *userdata)
   cJSON_AddStringToObject(disconnectJson, "ip", ip_address);
   struct timeval tv;
   gettimeofday(&tv, NULL);
-  char *tsbuf = (char *)cJSON_malloc(16);
+  char *ts_buf = (char *)cJSON_malloc(16);
   long ts = tv.tv_sec * 1000000 + tv.tv_usec;
-  sprintf(tsbuf, "%ld", ts);
-  cJSON_AddStringToObject(disconnectJson, "ts", tsbuf);
+  sprintf(ts_buf, "%ld", ts);
+  cJSON_AddStringToObject(disconnectJson, "ts", ts_buf);
   char *jsonString = cJSON_Print(disconnectJson);
   cJSON_Minify(jsonString);
 #ifdef DEBUG
@@ -108,7 +112,7 @@ static int on_acl_check_callback(int event, void *event_data, void *userdata)
 #ifdef DEBUG
   mosquitto_log_printf(MOSQ_LOG_INFO, "[on_acl_check_callback] :%s\n", jsonString);
 #endif
-  CURLcode code = http_post(jsonString, target_url);
+  long code = http_post(jsonString, target_url);
   cJSON_free(aclJson);
   if (code != CURLE_OK)
   {
@@ -143,10 +147,10 @@ static int on_message_callback(int event, void *event_data, void *userdata)
   cJSON_AddBoolToObject(msgJson, "retain", message->retain);
   struct timeval tv;
   gettimeofday(&tv, NULL);
-  char *tsbuf = (char *)cJSON_malloc(16);
+  char *ts_buf = (char *)cJSON_malloc(16);
   long ts = tv.tv_sec * 1000000 + tv.tv_usec;
-  sprintf(tsbuf, "%ld", ts);
-  cJSON_AddStringToObject(msgJson, "ts", tsbuf);
+  sprintf(ts_buf, "%ld", ts);
+  cJSON_AddStringToObject(msgJson, "ts", ts_buf);
   char *jsonString = cJSON_Print(msgJson);
   cJSON_Minify(jsonString);
 #ifdef DEBUG
@@ -184,7 +188,7 @@ static int on_auth_callback(int event, void *event_data, void *userdata)
 #ifdef DEBUG
   mosquitto_log_printf(MOSQ_LOG_INFO, "[on_auth_callback] => %s\n", jsonString);
 #endif
-  CURLcode code = http_post(jsonString, target_url);
+  long code = http_post(jsonString, target_url);
   cJSON_free(authJson);
   if (code != CURLE_OK)
   {
