@@ -9,7 +9,7 @@ all : binary
 binary : ${PLUGIN_NAME}.so
 
 ${PLUGIN_NAME}.so : ${PLUGIN_NAME}.c
-	$(CROSS_COMPILE)$(CC) $(PLUGIN_CPPFLAGS) $(PLUGIN_CFLAGS) $(PLUGIN_LDFLAGS) -fPIC -shared $< -o $@
+	$(CROSS_COMPILE)$(CC) $(PLUGIN_CPPFLAGS) $(PLUGIN_CFLAGS) $(PLUGIN_LDFLAGS) -fPIC -shared $< -o $@ -lcjson -lmosquitto -lcurl
 
 reallyclean : clean
 clean:

@@ -6,5 +6,8 @@ Eclipse Mosquitto
 ## 环境搭建
 Mosquitto 依赖了两个外部库：
 ```sh
-sudo apt-get install -y libcurl4-openssl-dev libcjson1 libjson-c-dev
+sudo apt-get install -y \
+    libcurl4-openssl-dev \
+    libcjson1 libjson-c-dev \
+    libjson-dev
 ```
