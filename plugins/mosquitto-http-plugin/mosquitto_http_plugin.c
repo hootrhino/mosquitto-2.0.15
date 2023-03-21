@@ -9,45 +9,43 @@
 #include <string.h>
 #include <curl/curl.h>
 #include <stdio.h>
-
+#define DEBUG
 #define UNUSED(A) (void)(A)
-
 #define MOSQ_ACL_NONE 0x00
 #define MOSQ_ACL_READ 0x01
 #define MOSQ_ACL_WRITE 0x02
 #define MOSQ_ACL_SUBSCRIBE 0x04
 #define MOSQ_ACL_UNSUBSCRIBE 0x08
 
-/// @brief
+/// @brief 插件的ID号, 留给mosquitto自己使用
 static mosquitto_plugin_id_t *plugin_identifier = NULL;
+/// @brief 全局 CURL 客户端
 static CURL *curl_client = NULL;
+/// @brief HTTP头链表
 static struct curl_slist *curl_http_headers = NULL;
-static const char *target_url = "http://127.0.0.1:8899";
+/// @brief 请求地址
+static char target_url[128] = "http://127.0.0.1:8899";
 //--------------------------------------------------------------------------------------------------
 // User Functions
 //--------------------------------------------------------------------------------------------------
 
-/// @brief
+/// @brief HTTP 请求函数
 /// @param jsonString
 /// @param url
 /// @return
-int http_post(char *jsonString, const char *url)
+static CURLcode http_post(char *jsonString, const char *url)
 {
-  if (curl_client)
+  curl_easy_setopt(curl_client, CURLOPT_URL, url);
+  curl_easy_setopt(curl_client, CURLOPT_HTTPHEADER, curl_http_headers);
+  curl_easy_setopt(curl_client, CURLOPT_POSTFIELDS, jsonString);
+  CURLcode code = curl_easy_perform(curl_client);
+  if (code != CURLE_OK)
   {
-    curl_easy_setopt(curl_client, CURLOPT_URL, url);
-    curl_easy_setopt(curl_client, CURLOPT_HTTPHEADER, curl_http_headers);
-    curl_easy_setopt(curl_client, CURLOPT_POSTFIELDS, jsonString);
-    printf("no error\n");
-    CURLcode res = curl_easy_perform(curl_client);
-
-    printf("error:%d\n", res);
-    return res;
+    mosquitto_log_printf(MOSQ_LOG_ERR, "http post error with error: %s, %s", curl_easy_strerror(code), target_url);
   }
-  printf("error\n");
-  return 400;
+  return code;
 }
-/// @brief
+/// @brief 当客户端离线的时候调用
 /// @param event
 /// @param event_data
 /// @param userdata
@@ -74,13 +72,15 @@ static int on_disconnect_callback(int event, void *event_data, void *userdata)
   cJSON_AddStringToObject(disconnectJson, "ts", tsbuf);
   char *jsonString = cJSON_Print(disconnectJson);
   cJSON_Minify(jsonString);
+#ifdef DEBUG
   mosquitto_log_printf(MOSQ_LOG_INFO, "[on_disconnect_callback] :%s\n", jsonString);
+#endif
   http_post(jsonString, target_url);
   cJSON_free(disconnectJson);
   return MOSQ_ERR_SUCCESS;
 }
 
-/// @brief
+/// @brief 当认证ACL的时候调用
 /// @param event
 /// @param event_data
 /// @param userdata
@@ -105,12 +105,18 @@ static int on_acl_check_callback(int event, void *event_data, void *userdata)
   cJSON_AddNumberToObject(aclJson, "access", acl_check_message->access);
   char *jsonString = cJSON_Print(aclJson);
   cJSON_Minify(jsonString);
+#ifdef DEBUG
   mosquitto_log_printf(MOSQ_LOG_INFO, "[on_acl_check_callback] :%s\n", jsonString);
-  http_post(jsonString, target_url);
+#endif
+  CURLcode code = http_post(jsonString, target_url);
   cJSON_free(aclJson);
+  if (code != CURLE_OK)
+  {
+    return MOSQ_ERR_ACL_DENIED;
+  }
   return MOSQ_ERR_SUCCESS;
 }
-/// @brief
+/// @brief 当消息转发的时候调用
 /// @param event
 /// @param event_data
 /// @param userdata
@@ -143,13 +149,15 @@ static int on_message_callback(int event, void *event_data, void *userdata)
   cJSON_AddStringToObject(msgJson, "ts", tsbuf);
   char *jsonString = cJSON_Print(msgJson);
   cJSON_Minify(jsonString);
+#ifdef DEBUG
   mosquitto_log_printf(MOSQ_LOG_INFO, "[on_message] :%s\n", jsonString);
+#endif
   http_post(jsonString, target_url);
 
   cJSON_free(msgJson);
   return MOSQ_ERR_SUCCESS;
 }
-/// @brief
+/// @brief 当登录的时候调用
 /// @param event
 /// @param event_data
 /// @param userdata
@@ -173,15 +181,21 @@ static int on_auth_callback(int event, void *event_data, void *userdata)
   cJSON_AddStringToObject(authJson, "password", password);
   char *jsonString = cJSON_Print(authJson);
   cJSON_Minify(jsonString);
+#ifdef DEBUG
   mosquitto_log_printf(MOSQ_LOG_INFO, "[on_auth_callback] => %s\n", jsonString);
-  http_post(jsonString, target_url);
+#endif
+  CURLcode code = http_post(jsonString, target_url);
   cJSON_free(authJson);
+  if (code != CURLE_OK)
+  {
+    return MOSQ_ERR_AUTH;
+  }
   return MOSQ_ERR_SUCCESS;
 }
 //--------------------------------------------------------------------------------------------------
 // Mosquitto Interface
 //--------------------------------------------------------------------------------------------------
-/// @brief
+/// @brief mosquitto的支持版本号检查
 /// @param supported_version_count
 /// @param supported_versions
 /// @return
@@ -199,7 +213,7 @@ int mosquitto_plugin_version(int supported_version_count, const int *supported_v
   }
   return -1;
 }
-/// @brief
+/// @brief 初始化函数
 /// @param identifier
 /// @param userdata
 /// @param options
@@ -212,8 +226,15 @@ int mosquitto_plugin_init(mosquitto_plugin_id_t *identifier,
 
 {
   UNUSED(userdata);
-  UNUSED(options);
-  UNUSED(option_count);
+  for (int i = 0; i < option_count; i++)
+  {
+    if (strcmp("mosquitto_http_plugin_url", options->key) == 0)
+    {
+      mosquitto_log_printf(MOSQ_LOG_INFO, "found mosquitto_http_plugin_url option: %s", options->value);
+      strcpy(target_url, options->value);
+    }
+  }
+
   plugin_identifier = identifier;
   curl_global_init(CURL_GLOBAL_DEFAULT);
   curl_client = curl_easy_init();
@@ -228,7 +249,7 @@ int mosquitto_plugin_init(mosquitto_plugin_id_t *identifier,
                               on_disconnect_callback, NULL, NULL);
   return MOSQ_ERR_SUCCESS;
 }
-/// @brief
+/// @brief 释放资源
 /// @param userdata
 /// @param options
 /// @param option_count

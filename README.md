@@ -9,5 +9,6 @@ Mosquitto 依赖了两个外部库：
 sudo apt-get install -y \
     libcurl4-openssl-dev \
     libcjson1 libjson-c-dev \
-    libjson-dev
+    libjson-dev \
+    libmosquitto-dev
 ```
