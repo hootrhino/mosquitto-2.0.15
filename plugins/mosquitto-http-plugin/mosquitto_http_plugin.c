@@ -11,11 +11,7 @@
 #include <stdio.h>
 #define DEBUG
 #define UNUSED(A) (void)(A)
-#define MOSQ_ACL_NONE 0x00
-#define MOSQ_ACL_READ 0x01
-#define MOSQ_ACL_WRITE 0x02
-#define MOSQ_ACL_SUBSCRIBE 0x04
-#define MOSQ_ACL_UNSUBSCRIBE 0x08
+
 //--------------------------------------------------------------------------------------------------
 // Plugin config
 //--------------------------------------------------------------------------------------------------
@@ -38,22 +34,53 @@ static mosquitto_http_plugin_config http_plugin_config = {
 //--------------------------------------------------------------------------------------------------
 // User Functions
 //--------------------------------------------------------------------------------------------------
+// #define MOSQ_ACL_NONE 0x00
+// #define MOSQ_ACL_READ 0x01
+// #define MOSQ_ACL_WRITE 0x02
+// #define MOSQ_ACL_SUBSCRIBE 0x04
+// #define MOSQ_ACL_UNSUBSCRIBE 0x08
+
+static void get_access_type(int code, char *access_type)
+{
+  switch (code)
+  {
+  case 0:
+    strcpy(access_type, "none");
+    break;
+  case 2:
+    strcpy(access_type, "pub");
+    break;
+  case 1:
+  case 4:
+    strcpy(access_type, "sub");
+    break;
+  case 8:
+    strcpy(access_type, "unsub");
+    break;
+  default:
+    strcpy(access_type, "none");
+    break;
+  }
+}
+static size_t http_receive_data(void *dataptr, size_t size, size_t nmemb, void *userptr)
+{
+  UNUSED(dataptr);
+  UNUSED(userptr);
+  return nmemb * size;
+}
 
 /// @brief HTTP 请求函数
 /// @param jsonString
 /// @param url
 /// @return
-static long http_post(char *jsonString, const char *url)
+static long http_post(char *jsonString)
 {
-  curl_easy_setopt(http_plugin_config.curl_client, CURLOPT_URL, url);
-  curl_easy_setopt(http_plugin_config.curl_client, CURLOPT_HTTPHEADER,
-                   http_plugin_config.curl_http_headers);
   curl_easy_setopt(http_plugin_config.curl_client, CURLOPT_POSTFIELDS, jsonString);
   long code = curl_easy_perform(http_plugin_config.curl_client);
 
   if (code != CURLE_OK)
   {
-    mosquitto_log_printf(MOSQ_LOG_ERR, "http post error with error: %s, %s",
+    mosquitto_log_printf(MOSQ_LOG_ERR, "http post error: %s, %s",
                          curl_easy_strerror(code), http_plugin_config.target_url);
     return code;
   }
@@ -91,8 +118,10 @@ static int on_disconnect_callback(int event, void *event_data, void *userdata)
 #ifdef DEBUG
   mosquitto_log_printf(MOSQ_LOG_INFO, "[on_disconnect_callback] :%s\n", jsonString);
 #endif
-  http_post(jsonString, http_plugin_config.target_url);
+  http_post(jsonString);
   cJSON_free(disconnectJson);
+  mosquitto_broker_publish(NULL, "$SYS/brokers/clients/disconnected",
+                           (int)strlen(jsonString), jsonString, 1, 0, NULL);
   return MOSQ_ERR_SUCCESS;
 }
 
@@ -118,15 +147,17 @@ static int on_acl_check_callback(int event, void *event_data, void *userdata)
   cJSON_AddStringToObject(aclJson, "username", username);
   cJSON_AddNumberToObject(aclJson, "qos", acl_check_message->qos);
   cJSON_AddStringToObject(aclJson, "topic", acl_check_message->topic);
-  cJSON_AddNumberToObject(aclJson, "access", acl_check_message->access);
+  char access_type[6];
+  get_access_type(acl_check_message->access, access_type);
+  cJSON_AddStringToObject(aclJson, "access", access_type);
   char *jsonString = cJSON_Print(aclJson);
   cJSON_Minify(jsonString);
 #ifdef DEBUG
   mosquitto_log_printf(MOSQ_LOG_INFO, "[on_acl_check_callback] :%s\n", jsonString);
 #endif
-  long code = http_post(jsonString, http_plugin_config.target_url);
+  long code = http_post(jsonString);
   cJSON_free(aclJson);
-  if (code != CURLE_OK)
+  if (code != 200)
   {
     return MOSQ_ERR_ACL_DENIED;
   }
@@ -168,7 +199,7 @@ static int on_message_callback(int event, void *event_data, void *userdata)
 #ifdef DEBUG
   mosquitto_log_printf(MOSQ_LOG_INFO, "[on_message] :%s\n", jsonString);
 #endif
-  http_post(jsonString, http_plugin_config.target_url);
+  http_post(jsonString);
 
   cJSON_free(msgJson);
   return MOSQ_ERR_SUCCESS;
@@ -200,12 +231,14 @@ static int on_auth_callback(int event, void *event_data, void *userdata)
 #ifdef DEBUG
   mosquitto_log_printf(MOSQ_LOG_INFO, "[on_auth_callback] => %s\n", jsonString);
 #endif
-  long code = http_post(jsonString, http_plugin_config.target_url);
+  long code = http_post(jsonString);
   cJSON_free(authJson);
-  if (code != CURLE_OK)
+  if (code != 200)
   {
     return MOSQ_ERR_AUTH;
   }
+  mosquitto_broker_publish(NULL, "$SYS/brokers/clients/connected",
+                           (int)strlen(jsonString), jsonString, 1, 0, NULL);
   return MOSQ_ERR_SUCCESS;
 }
 //--------------------------------------------------------------------------------------------------
@@ -218,16 +251,10 @@ static int on_auth_callback(int event, void *event_data, void *userdata)
 int mosquitto_plugin_version(int supported_version_count, const int *supported_versions)
 
 {
-  int i;
-
-  for (i = 0; i < supported_version_count; i++)
-  {
-    if (supported_versions[i] == 5)
-    {
-      return 5;
-    }
-  }
-  return -1;
+  UNUSED(supported_version_count);
+  UNUSED(supported_versions);
+  // V5版本的插件
+  return 5;
 }
 /// @brief 初始化函数
 /// @param identifier
@@ -241,21 +268,40 @@ int mosquitto_plugin_init(mosquitto_plugin_id_t *identifier,
                           int option_count)
 
 {
+  http_plugin_config.plugin_identifier = identifier;
   UNUSED(userdata);
+  //------------------------------------------------------------------------------------------------
+  // init config options
+  //------------------------------------------------------------------------------------------------
   for (int i = 0; i < option_count; i++)
   {
     if (strcmp("mosquitto_http_plugin_url", (options + i)->key) == 0)
     {
-      mosquitto_log_printf(MOSQ_LOG_INFO, "found mosquitto_http_plugin_url option: %s", options->value);
+      mosquitto_log_printf(MOSQ_LOG_INFO, "found plugin url option: %s", options->value);
       strcpy(http_plugin_config.target_url, options->value);
     }
   }
+  //------------------------------------------------------------------------------------------------
+  // init config options end
+  //------------------------------------------------------------------------------------------------
 
-  http_plugin_config.plugin_identifier = identifier;
+  //------------------------------------------------------------------------------------------------
+  // init curl
+  //------------------------------------------------------------------------------------------------
   curl_global_init(CURL_GLOBAL_DEFAULT);
   http_plugin_config.curl_client = curl_easy_init();
   http_plugin_config.curl_http_headers = curl_slist_append(http_plugin_config.curl_http_headers,
                                                            "Content-Type: application/json");
+  curl_easy_setopt(http_plugin_config.curl_client, CURLOPT_HTTPHEADER,
+                   http_plugin_config.curl_http_headers);
+  curl_easy_setopt(http_plugin_config.curl_client, CURLOPT_TIMEOUT, 5000);
+  curl_easy_setopt(http_plugin_config.curl_client, CURLOPT_WRITEFUNCTION, http_receive_data);
+  curl_easy_setopt(http_plugin_config.curl_client, CURLOPT_URL,
+                   http_plugin_config.target_url);
+  //------------------------------------------------------------------------------------------------
+  // init curl end
+  //------------------------------------------------------------------------------------------------
+
   mosquitto_callback_register(http_plugin_config.plugin_identifier, MOSQ_EVT_BASIC_AUTH,
                               on_auth_callback, NULL, NULL);
   mosquitto_callback_register(http_plugin_config.plugin_identifier, MOSQ_EVT_MESSAGE,
@@ -276,8 +322,8 @@ int mosquitto_plugin_cleanup(void *userdata, struct mosquitto_opt *options, int 
   UNUSED(userdata);
   UNUSED(options);
   UNUSED(option_count);
-  curl_global_cleanup();
   curl_easy_cleanup(http_plugin_config.curl_client);
+  curl_global_cleanup();
   mosquitto_callback_unregister(http_plugin_config.plugin_identifier,
                                 MOSQ_EVT_DISCONNECT, on_auth_callback, NULL);
   mosquitto_callback_unregister(http_plugin_config.plugin_identifier,

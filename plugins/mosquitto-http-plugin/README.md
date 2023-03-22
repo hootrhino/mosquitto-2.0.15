@@ -31,9 +31,17 @@ plugin_opt_mosquitto_http_plugin_url http://127.0.0.1:8899
     "username": "u1",
     "clientID": "id1",
     "topic": "d/0",
-    "access": "sub",
+    "access": 1,
     "ip": "127.0.0.2"
 }
+```
+Access枚举：
+```sh
+NONE  ->    0
+SUB   ->    1
+PUB   ->    2
+SUB   ->    4
+UNSUB ->    8
 ```
 ## 消息转发
 当mosquitto收到发布的消息的时候，直接转发到目标HTTP接口
