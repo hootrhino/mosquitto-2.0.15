@@ -16,15 +16,25 @@
 #define MOSQ_ACL_WRITE 0x02
 #define MOSQ_ACL_SUBSCRIBE 0x04
 #define MOSQ_ACL_UNSUBSCRIBE 0x08
+//--------------------------------------------------------------------------------------------------
+// Plugin config
+//--------------------------------------------------------------------------------------------------
 
-/// @brief 插件的ID号, 留给mosquitto自己使用
-static mosquitto_plugin_id_t *plugin_identifier = NULL;
-/// @brief 全局 CURL 客户端
-static CURL *curl_client = NULL;
-/// @brief HTTP头链表
-static struct curl_slist *curl_http_headers = NULL;
-/// @brief 请求地址
-static char target_url[128] = "http://127.0.0.1:8899";
+typedef struct
+{
+  mosquitto_plugin_id_t *plugin_identifier;
+  CURL *curl_client;
+  struct curl_slist *curl_http_headers;
+  char target_url[2048]; // 2048 is max URL length
+} mosquitto_http_plugin_config;
+//
+static mosquitto_http_plugin_config http_plugin_config = {
+    .plugin_identifier = NULL,
+    .curl_client = NULL,
+    .curl_http_headers = NULL,
+    .target_url = "http://127.0.0.1:8899",
+};
+
 //--------------------------------------------------------------------------------------------------
 // User Functions
 //--------------------------------------------------------------------------------------------------
@@ -35,18 +45,20 @@ static char target_url[128] = "http://127.0.0.1:8899";
 /// @return
 static long http_post(char *jsonString, const char *url)
 {
-  curl_easy_setopt(curl_client, CURLOPT_URL, url);
-  curl_easy_setopt(curl_client, CURLOPT_HTTPHEADER, curl_http_headers);
-  curl_easy_setopt(curl_client, CURLOPT_POSTFIELDS, jsonString);
-  long code = curl_easy_perform(curl_client);
+  curl_easy_setopt(http_plugin_config.curl_client, CURLOPT_URL, url);
+  curl_easy_setopt(http_plugin_config.curl_client, CURLOPT_HTTPHEADER,
+                   http_plugin_config.curl_http_headers);
+  curl_easy_setopt(http_plugin_config.curl_client, CURLOPT_POSTFIELDS, jsonString);
+  long code = curl_easy_perform(http_plugin_config.curl_client);
 
   if (code != CURLE_OK)
   {
-    mosquitto_log_printf(MOSQ_LOG_ERR, "http post error with error: %s, %s", curl_easy_strerror(code), target_url);
+    mosquitto_log_printf(MOSQ_LOG_ERR, "http post error with error: %s, %s",
+                         curl_easy_strerror(code), http_plugin_config.target_url);
     return code;
   }
   long http_code = 0;
-  curl_easy_getinfo(curl_client, CURLINFO_RESPONSE_CODE, &http_code);
+  curl_easy_getinfo(http_plugin_config.curl_client, CURLINFO_RESPONSE_CODE, &http_code);
   return http_code;
 }
 /// @brief 当客户端离线的时候调用
@@ -79,7 +91,7 @@ static int on_disconnect_callback(int event, void *event_data, void *userdata)
 #ifdef DEBUG
   mosquitto_log_printf(MOSQ_LOG_INFO, "[on_disconnect_callback] :%s\n", jsonString);
 #endif
-  http_post(jsonString, target_url);
+  http_post(jsonString, http_plugin_config.target_url);
   cJSON_free(disconnectJson);
   return MOSQ_ERR_SUCCESS;
 }
@@ -112,7 +124,7 @@ static int on_acl_check_callback(int event, void *event_data, void *userdata)
 #ifdef DEBUG
   mosquitto_log_printf(MOSQ_LOG_INFO, "[on_acl_check_callback] :%s\n", jsonString);
 #endif
-  long code = http_post(jsonString, target_url);
+  long code = http_post(jsonString, http_plugin_config.target_url);
   cJSON_free(aclJson);
   if (code != CURLE_OK)
   {
@@ -156,7 +168,7 @@ static int on_message_callback(int event, void *event_data, void *userdata)
 #ifdef DEBUG
   mosquitto_log_printf(MOSQ_LOG_INFO, "[on_message] :%s\n", jsonString);
 #endif
-  http_post(jsonString, target_url);
+  http_post(jsonString, http_plugin_config.target_url);
 
   cJSON_free(msgJson);
   return MOSQ_ERR_SUCCESS;
@@ -188,7 +200,7 @@ static int on_auth_callback(int event, void *event_data, void *userdata)
 #ifdef DEBUG
   mosquitto_log_printf(MOSQ_LOG_INFO, "[on_auth_callback] => %s\n", jsonString);
 #endif
-  long code = http_post(jsonString, target_url);
+  long code = http_post(jsonString, http_plugin_config.target_url);
   cJSON_free(authJson);
   if (code != CURLE_OK)
   {
@@ -235,21 +247,22 @@ int mosquitto_plugin_init(mosquitto_plugin_id_t *identifier,
     if (strcmp("mosquitto_http_plugin_url", (options + i)->key) == 0)
     {
       mosquitto_log_printf(MOSQ_LOG_INFO, "found mosquitto_http_plugin_url option: %s", options->value);
-      strcpy(target_url, options->value);
+      strcpy(http_plugin_config.target_url, options->value);
     }
   }
 
-  plugin_identifier = identifier;
+  http_plugin_config.plugin_identifier = identifier;
   curl_global_init(CURL_GLOBAL_DEFAULT);
-  curl_client = curl_easy_init();
-  curl_http_headers = curl_slist_append(curl_http_headers, "Content-Type: application/json");
-  mosquitto_callback_register(plugin_identifier, MOSQ_EVT_BASIC_AUTH,
+  http_plugin_config.curl_client = curl_easy_init();
+  http_plugin_config.curl_http_headers = curl_slist_append(http_plugin_config.curl_http_headers,
+                                                           "Content-Type: application/json");
+  mosquitto_callback_register(http_plugin_config.plugin_identifier, MOSQ_EVT_BASIC_AUTH,
                               on_auth_callback, NULL, NULL);
-  mosquitto_callback_register(plugin_identifier, MOSQ_EVT_MESSAGE,
+  mosquitto_callback_register(http_plugin_config.plugin_identifier, MOSQ_EVT_MESSAGE,
                               on_message_callback, NULL, NULL);
-  mosquitto_callback_register(plugin_identifier, MOSQ_EVT_ACL_CHECK,
+  mosquitto_callback_register(http_plugin_config.plugin_identifier, MOSQ_EVT_ACL_CHECK,
                               on_acl_check_callback, NULL, NULL);
-  mosquitto_callback_register(plugin_identifier, MOSQ_EVT_DISCONNECT,
+  mosquitto_callback_register(http_plugin_config.plugin_identifier, MOSQ_EVT_DISCONNECT,
                               on_disconnect_callback, NULL, NULL);
   return MOSQ_ERR_SUCCESS;
 }
@@ -264,10 +277,14 @@ int mosquitto_plugin_cleanup(void *userdata, struct mosquitto_opt *options, int 
   UNUSED(options);
   UNUSED(option_count);
   curl_global_cleanup();
-  curl_easy_cleanup(curl_client);
-  mosquitto_callback_unregister(plugin_identifier, MOSQ_EVT_DISCONNECT, on_auth_callback, NULL);
-  mosquitto_callback_unregister(plugin_identifier, MOSQ_EVT_ACL_CHECK, on_auth_callback, NULL);
-  mosquitto_callback_unregister(plugin_identifier, MOSQ_EVT_MESSAGE, on_auth_callback, NULL);
-  mosquitto_callback_unregister(plugin_identifier, MOSQ_EVT_BASIC_AUTH, on_message_callback, NULL);
+  curl_easy_cleanup(http_plugin_config.curl_client);
+  mosquitto_callback_unregister(http_plugin_config.plugin_identifier,
+                                MOSQ_EVT_DISCONNECT, on_auth_callback, NULL);
+  mosquitto_callback_unregister(http_plugin_config.plugin_identifier,
+                                MOSQ_EVT_ACL_CHECK, on_auth_callback, NULL);
+  mosquitto_callback_unregister(http_plugin_config.plugin_identifier,
+                                MOSQ_EVT_MESSAGE, on_auth_callback, NULL);
+  mosquitto_callback_unregister(http_plugin_config.plugin_identifier,
+                                MOSQ_EVT_BASIC_AUTH, on_message_callback, NULL);
   return MOSQ_ERR_SUCCESS;
 }
