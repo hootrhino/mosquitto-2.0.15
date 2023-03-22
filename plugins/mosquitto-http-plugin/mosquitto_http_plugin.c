@@ -232,7 +232,7 @@ int mosquitto_plugin_init(mosquitto_plugin_id_t *identifier,
   UNUSED(userdata);
   for (int i = 0; i < option_count; i++)
   {
-    if (strcmp("mosquitto_http_plugin_url", options->key) == 0)
+    if (strcmp("mosquitto_http_plugin_url", (options + i)->key) == 0)
     {
       mosquitto_log_printf(MOSQ_LOG_INFO, "found mosquitto_http_plugin_url option: %s", options->value);
       strcpy(target_url, options->value);
