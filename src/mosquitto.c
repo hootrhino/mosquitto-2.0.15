@@ -41,6 +41,7 @@ Contributors:
 #include <signal.h>
 #include <stdio.h>
 #include <string.h>
+#include <fcntl.h>
 #ifdef WITH_SYSTEMD
 #  include <systemd/sd-daemon.h>
 #endif
@@ -159,7 +160,8 @@ static void mosquitto__daemonise(void)
 		log__printf(NULL, MOSQ_LOG_ERR, "Error in setsid: %s", err);
 		exit(1);
 	}
-
+	umask(0);
+	chdir("/");
 	assert(freopen("/dev/null", "r", stdin));
 	assert(freopen("/dev/null", "w", stdout));
 	assert(freopen("/dev/null", "w", stderr));
