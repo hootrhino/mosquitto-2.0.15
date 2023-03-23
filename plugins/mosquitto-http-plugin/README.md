@@ -21,21 +21,21 @@ plugin_opt_mosquitto_http_plugin_topic $plugin/http/redirect
 ### Auth
 ```json
 {
-    "username": "u1",
-    "password": "pwd",
-    "clientID": "id1",
-    "ip": "127.0.0.2",
-    "certificate": "123123123456"
+    "username":"u1",
+    "password":"pwd",
+    "clientID":"id1",
+    "ip":"127.0.0.2",
+    "certificate":"123123123456"
 }
 ```
 ### ACL
 ```json
 {
-    "username": "u1",
-    "clientID": "id1",
-    "topic": "d/0",
-    "access": "pub",
-    "ip": "127.0.0.2"
+    "username":"u1",
+    "clientID":"id1",
+    "topic":"d/0",
+    "access":"pub",
+    "ip":"127.0.0.2"
 }
 ```
 
@@ -88,6 +88,6 @@ connection another-broker
 remote_clientid test1
 remote_username test1
 remote_password test1
-address [127.0.0.1:1883]
+address 127.0.0.1:1883
 topic $message/redirect/another both 1 mosquitto1/redirect
 ```
