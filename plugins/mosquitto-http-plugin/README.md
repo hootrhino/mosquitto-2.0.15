@@ -1,6 +1,7 @@
 mosquitto http 插件
 ==========================
 ## 编译
+依赖: cjson,  mosquitto, curl
 ```sh
 make
 ```
@@ -11,6 +12,8 @@ listener 1883
 allow_anonymous true
 plugin  ../plugins/mosquitto-http-plugin/mosquitto_http_plugin.so
 plugin_opt_mosquitto_http_plugin_url http://127.0.0.1:8899
+plugin_opt_mosquitto_http_plugin_topic $plugin/http/redirect
+
 ```
 
 ## HTTP 认证
@@ -18,33 +21,26 @@ plugin_opt_mosquitto_http_plugin_url http://127.0.0.1:8899
 ### Auth
 ```json
 {
-    "username": "u1",
-    "password": "pwd",
-    "clientID": "id1",
-    "ip": "127.0.0.2",
-    "certificate": "123123123456"
+    "username": "u1",
+    "password": "pwd",
+    "clientID": "id1",
+    "ip": "127.0.0.2",
+    "certificate": "123123123456"
 }
 ```
 ### ACL
 ```json
 {
-    "username": "u1",
-    "clientID": "id1",
-    "topic": "d/0",
-    "access": 1,
-    "ip": "127.0.0.2"
+    "username": "u1",
+    "clientID": "id1",
+    "topic": "d/0",
+    "access": "pub",
+    "ip": "127.0.0.2"
 }
 ```
-Access枚举：
-```sh
-NONE  ->    0
-SUB   ->    1
-PUB   ->    2
-SUB   ->    4
-UNSUB ->    8
-```
+
 ## 消息转发
-当mosquitto收到发布的消息的时候，直接转发到目标HTTP接口
+当mosquitto收到上线的消息的时候，直接转发到目标HTTP接口, 同时会转发到`$SYS/brokers/clients/connected` Topic.
 ### 上线
 ```json
 {
@@ -59,6 +55,8 @@ UNSUB ->    8
 }
 ```
 ### 下线
+当mosquitto收到下线消息的时候，直接转发到目标HTTP接口, 同时会转发到`$SYS/brokers/clients/disconnected` Topic.
+
 ```json
 {
     "action":"client_disconnected",
@@ -68,7 +66,7 @@ UNSUB ->    8
 }
 ```
 ### 转发消息
-同时消息会通过HTTP接口转发到目标地址，消息体格式:
+当mosquitto 特定 Topic 收到消息的时候，消息会通过HTTP接口转发到目标地址，消息体格式:
 ```json
 {
     "action":"message_publish",
@@ -80,4 +78,16 @@ UNSUB ->    8
     "payload":"Hello world!",
     "ts":1492412774
 }
+```
+
+## 消息桥接
+Mosquitto 支持桥接，一次可以实现消息转发到另一个MQTT Server。
+```
+cleansession true
+connection another-broker
+remote_clientid test1
+remote_username test1
+remote_password test1
+address [127.0.0.1:1883]
+topic $message/redirect/another both 1 mosquitto1/redirect
 ```
