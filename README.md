@@ -7,8 +7,8 @@ Eclipse Mosquitto
 Mosquitto 依赖了两个外部库：
 ```sh
 sudo apt-get install -y \
-    libcurl4-openssl-dev \
-    libcjson1 libjson-c-dev \
-    libjson-dev \
+    libssl-dev \
+    libcjson1 \
+    libjson-c-dev \
     libmosquitto-dev
 ```
